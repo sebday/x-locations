@@ -52,7 +52,7 @@
     el.textContent =
       "[" +
       FLAG_ATTR +
-      "]{display:inline-flex;align-items:center;margin:0 .15em 0 .28em;font-size:1em;line-height:1;user-select:none;vertical-align:middle}";
+      "]{display:inline-flex;align-items:center;flex-shrink:0;margin:0 .15em 0 .28em;font-size:1em;line-height:1;user-select:none;vertical-align:middle}";
     (document.head || document.documentElement).appendChild(el);
   }
 
@@ -77,13 +77,37 @@
     return raw;
   }
 
+  function profileHandleFromUrl() {
+    const parts = location.pathname.split("/").filter(Boolean);
+    if (parts.length === 0) return "";
+    const raw = parts[0];
+    if (SKIP[raw.toLowerCase()]) return "";
+    if (!HANDLE_RE.test(raw)) return "";
+    return raw;
+  }
+
+  function handleFromAt(row) {
+    const who = handleNode(row);
+    if (!who) return "";
+    const text = (who.textContent || "").trim().replace(/^@/, "");
+    if (!HANDLE_RE.test(text)) return "";
+    return text;
+  }
+
   function handleFromRow(row) {
-    const links = row.querySelectorAll('a[href]');
+    const links = row.querySelectorAll("a[href]");
     for (let i = 0; i < links.length; i++) {
       const handle = handleFromHref(links[i].getAttribute("href"));
       if (handle) return handle;
     }
+    const at = handleFromAt(row);
+    if (at) return at;
+    if (row.getAttribute("data-testid") === "UserName") return profileHandleFromUrl();
     return "";
+  }
+
+  function isProfileHeader(row) {
+    return row.getAttribute("data-testid") === "UserName";
   }
 
   function isHandleText(node) {
@@ -97,6 +121,40 @@
       if (isHandleText(links[i])) return links[i];
     }
     return null;
+  }
+
+  function handleNode(row) {
+    const link = handleLink(row);
+    if (link) return link;
+    const nodes = row.querySelectorAll("span, a");
+    for (let i = 0; i < nodes.length; i++) {
+      if (isHandleText(nodes[i]) && !nodes[i].querySelector("span, a")) return nodes[i];
+    }
+    for (let i = 0; i < nodes.length; i++) {
+      if (isHandleText(nodes[i])) return nodes[i];
+    }
+    return null;
+  }
+
+  function profileNameLine(row) {
+    const at = handleNode(row);
+    const nodes = row.querySelectorAll("span");
+    let name = null;
+    for (let i = 0; i < nodes.length; i++) {
+      const text = (nodes[i].textContent || "").trim();
+      if (!text || text.charAt(0) === "@") continue;
+      if (nodes[i].querySelector("span")) continue;
+      name = nodes[i];
+      break;
+    }
+    if (!name) return row.firstElementChild || row;
+    let cluster = name;
+    while (cluster.parentElement && cluster.parentElement !== row) {
+      const parent = cluster.parentElement;
+      if (at && parent.contains(at) && !cluster.contains(at)) break;
+      cluster = parent;
+    }
+    return cluster;
   }
 
   function timeNode(row) {
@@ -232,13 +290,31 @@
     });
   }
 
+  function rowChild(row, el) {
+    let node = el;
+    while (node.parentElement && node.parentElement !== row) node = node.parentElement;
+    return node.parentElement === row ? node : null;
+  }
+
   function applyFlag(row, place, handle) {
     row.removeAttribute(PENDING_ATTR);
     if (findFlag(row, handle)) return;
     if (!place) return;
     const flag = makeFlag(place, handle);
-    const after = timeNode(row) || handleLink(row);
-    if (after && after.parentNode) {
+    if (isProfileHeader(row)) {
+      const line = profileNameLine(row);
+      if (line) {
+        line.appendChild(flag);
+        return;
+      }
+    }
+    const after = timeNode(row) || handleNode(row);
+    if (after) {
+      const cluster = rowChild(row, after);
+      if (cluster) {
+        cluster.insertAdjacentElement("afterend", flag);
+        return;
+      }
       after.insertAdjacentElement("afterend", flag);
       return;
     }
