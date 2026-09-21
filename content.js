@@ -90,43 +90,44 @@
     return ((node && node.textContent) || "").trim().charAt(0) === "@";
   }
 
-  function hasHandleLink(node) {
-    if (!node || !node.querySelectorAll) return false;
-    const links = node.querySelectorAll("a[href]");
-    for (let i = 0; i < links.length; i++) {
-      if (isHandleText(links[i])) return true;
-    }
-    return false;
-  }
-
-  function nameLink(row) {
+  function handleLink(row) {
     const links = row.querySelectorAll("a[href]");
     for (let i = 0; i < links.length; i++) {
       if (!handleFromHref(links[i].getAttribute("href"))) continue;
-      if (isHandleText(links[i])) continue;
-      return links[i];
+      if (isHandleText(links[i])) return links[i];
     }
-    return row.querySelector("a[href]");
+    return null;
   }
 
-  function nameCluster(row, link) {
-    let el = link;
-    while (el.parentElement && el.parentElement !== row) {
-      const parent = el.parentElement;
-      if (hasHandleLink(parent) && !hasHandleLink(el)) break;
-      el = parent;
+  function timeNode(row) {
+    const time = row.querySelector("time");
+    if (time) return time.closest("a") || time;
+    const links = row.querySelectorAll("a[href]");
+    for (let i = 0; i < links.length; i++) {
+      const href = links[i].getAttribute("href") || "";
+      if (href.indexOf("/status/") !== -1) return links[i];
     }
-    return el;
+    return null;
   }
 
-  function makeFlag(place) {
+  function makeFlag(place, handle) {
     const emoji = (globalThis.XLocFlags && XLocFlags.emojiForPlace(place)) || "🌍";
     const span = document.createElement("span");
     span.setAttribute(FLAG_ATTR, place);
+    span.setAttribute("data-x-loc-handle", handle.toLowerCase());
     span.setAttribute("title", "Based in " + place);
     span.setAttribute("aria-label", "Based in " + place);
     span.textContent = emoji;
     return span;
+  }
+
+  function findFlag(row, handle) {
+    const key = handle.toLowerCase();
+    const flags = row.querySelectorAll("[" + FLAG_ATTR + "]");
+    for (let i = 0; i < flags.length; i++) {
+      if ((flags[i].getAttribute("data-x-loc-handle") || "") === key) return flags[i];
+    }
+    return flags[0] || null;
   }
 
   function readStorage() {
@@ -231,43 +232,34 @@
     });
   }
 
-  function applyFlag(row, place) {
+  function applyFlag(row, place, handle) {
     row.removeAttribute(PENDING_ATTR);
-    if (row.querySelector("[" + FLAG_ATTR + "]")) return;
+    if (findFlag(row, handle)) return;
     if (!place) return;
-    const link = nameLink(row);
-    if (!link) return;
-    const cluster = nameCluster(row, link);
-    if (!cluster || !cluster.parentNode) return;
-    const flag = makeFlag(place);
-    if (cluster === link) {
-      let node = cluster;
-      let sib = node.nextElementSibling;
-      while (sib && !isHandleText(sib) && (sib.tagName === "svg" || (sib.querySelector && sib.querySelector("svg")))) {
-        node = sib;
-        sib = sib.nextElementSibling;
-      }
-      node.insertAdjacentElement("afterend", flag);
+    const flag = makeFlag(place, handle);
+    const after = timeNode(row) || handleLink(row);
+    if (after && after.parentNode) {
+      after.insertAdjacentElement("afterend", flag);
       return;
     }
-    cluster.appendChild(flag);
+    row.appendChild(flag);
   }
 
   function processRow(row) {
-    if (row.querySelector("[" + FLAG_ATTR + "]")) return;
     if (row.getAttribute(PENDING_ATTR)) return;
     const handle = handleFromRow(row);
     if (!handle) return;
+    if (findFlag(row, handle)) return;
     const hit = cached(handle);
     if (hit.status === "ok") {
-      applyFlag(row, hit.place);
+      applyFlag(row, hit.place, handle);
       return;
     }
     if (hit.status === "wait") return;
     row.setAttribute(PENDING_ATTR, handle);
     enqueue(handle).then(function (place) {
       if (!row.isConnected) return;
-      applyFlag(row, place);
+      applyFlag(row, place, handle);
     });
   }
 
